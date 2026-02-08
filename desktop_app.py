@@ -735,18 +735,20 @@ class SimpleSTTApp:
             except Exception:
                 pass
 
+            # Paste in background thread (don't block main Tkinter thread)
+            threading.Thread(
+                target=self.paste_to_active_window,
+                args=(transcription,),
+                daemon=True
+            ).start()
+
             # Update UI on main thread
             def update_ui():
                 print("[DEBUG] Updating UI with transcription...")
                 self.output_text.insert(tk.END, transcription + "\n")
                 self.output_text.see(tk.END)
-
-                # Paste BEFORE overlay update (overlay show can affect focus)
-                print("[DEBUG] Auto-pasting...")
-                self.paste_to_active_window(transcription)
                 self.status_var.set(f"Transcribed and pasted! ({duration:.1f}s)")
 
-                # Update overlay after paste
                 if self.overlay_window:
                     self.overlay_window.update_text(transcription + "\n")
 
@@ -960,15 +962,18 @@ class SimpleSTTApp:
                     if transcription != self.last_transcription:
                         self.last_transcription = transcription
 
+                        # Paste in background thread (don't block main Tkinter thread)
+                        threading.Thread(
+                            target=self.paste_to_active_window,
+                            args=(transcription + " ",),
+                            daemon=True
+                        ).start()
+
                         def update_ui():
                             print(f"[DEBUG] Inserting: '{transcription}'")
                             self.output_text.insert(tk.END, transcription + " ")
                             self.output_text.see(tk.END)
 
-                            # Paste BEFORE overlay update (overlay show can affect focus)
-                            self.paste_to_active_window(transcription + " ")
-
-                            # Update overlay after paste
                             if self.overlay_window:
                                 self.overlay_window.update_text(transcription + " ")
 
@@ -984,19 +989,22 @@ class SimpleSTTApp:
     def paste_to_active_window(self, text):
         """Type text to active window.
 
-        Game Mode: uses PostMessage/WM_CHAR to bypass anti-cheat detection.
+        Game Mode: uses IME composition (imm32) to inject text through the
+        system IME pipeline — same mechanism Win+H voice typing uses for
+        non-TSF apps. Falls back to PostMessage WM_CHAR if IME fails.
         Normal Mode: uses pynput (SendInput) for maximum compatibility.
         """
         if self.settings.get('game_mode', False):
-            # Game Mode: use PostMessage to bypass anti-cheat (like Win+H voice typing)
-            print(f"[DEBUG] Game Mode: typing via PostMessage/WM_CHAR")
+            print(f"[DEBUG] Game Mode: typing via IME composition")
             try:
                 time.sleep(0.05)  # Brief delay to ensure window focus
                 success = self._post_message_type(text)
                 if not success:
-                    print(f"[DEBUG] PostMessage typing failed - no foreground window")
+                    print(f"[DEBUG] Game mode typing failed - no foreground window")
             except Exception as e:
-                print(f"[DEBUG] Failed to type text via PostMessage: {e}")
+                print(f"[DEBUG] Failed to type text via game mode: {e}")
+                import traceback
+                traceback.print_exc()
         else:
             # Normal mode: use pynput (SendInput) for best compatibility
             try:
@@ -1007,32 +1015,27 @@ class SimpleSTTApp:
             except Exception as e:
                 print(f"[DEBUG] Failed to type text: {e}")
 
-    def _post_message_type(self, text):
-        """Type text using PostMessage/WM_CHAR (bypasses SendInput detection).
-
-        Sends characters through the Windows message queue using PostMessageW,
-        which is how Windows native voice typing (Win+H) delivers text.
-        Unlike SendInput, this does not set the LLMHF_INJECTED flag.
+    def _get_target_hwnd(self):
+        """Get the target window handle (focused child of foreground window).
 
         Uses AttachThreadInput + GetFocus to find the actual focused child
         control (e.g. a game's chat input box) rather than the top-level window.
+        Returns (hwnd, target_tid) or (None, None) if no foreground window.
         """
         import ctypes
+        from ctypes import wintypes
 
         user32 = ctypes.windll.user32
         kernel32 = ctypes.windll.kernel32
 
-        WM_CHAR = 0x0102
-        WM_KEYDOWN = 0x0100
-        WM_KEYUP = 0x0101
-        VK_RETURN = 0x0D
+        # Set proper return types for 64-bit safety
+        user32.GetForegroundWindow.restype = wintypes.HWND
+        user32.GetFocus.restype = wintypes.HWND
 
-        # Get foreground window
         hwnd = user32.GetForegroundWindow()
         if not hwnd:
-            return False
+            return None, None
 
-        # Attach to target thread to access its focused control
         target_tid = user32.GetWindowThreadProcessId(hwnd, None)
         current_tid = kernel32.GetCurrentThreadId()
         attached = False
@@ -1041,31 +1044,131 @@ class SimpleSTTApp:
             attached = user32.AttachThreadInput(current_tid, target_tid, True)
 
         try:
-            # GetFocus returns the actual focused child (e.g. chat input box)
             focused = user32.GetFocus()
             if focused:
                 hwnd = focused
-                print(f"[DEBUG] PostMessage: using focused child window {hwnd}")
+                print(f"[DEBUG] Target: focused child window {hwnd}")
             else:
-                print(f"[DEBUG] PostMessage: using foreground window {hwnd}")
+                print(f"[DEBUG] Target: foreground window {hwnd}")
         finally:
             if attached:
                 user32.AttachThreadInput(current_tid, target_tid, False)
 
-        # Send characters to the focused control
+        return hwnd, target_tid
+
+    def _post_message_type(self, text):
+        """Type text using IME composition with WM_CHAR fallback.
+
+        Primary: IME composition via imm32 (ImmSetCompositionStringW).
+        This is what Win+H voice typing uses for non-TSF apps like games.
+        Fallback: PostMessage WM_CHAR with correct lParam.
+        """
+        hwnd, target_tid = self._get_target_hwnd()
+        if not hwnd:
+            return False
+
+        # Try IME composition first (closest to Win+H behavior)
+        if self._ime_compose(hwnd, target_tid, text):
+            print(f"[DEBUG] IME compose success")
+            return True
+
+        print(f"[DEBUG] IME compose failed, falling back to WM_CHAR")
+        return self._wm_char_fallback(hwnd, text)
+
+    def _ime_compose(self, hwnd, target_tid, text):
+        """Inject text via IME composition (closest to Win+H behavior).
+
+        Uses ImmSetCompositionStringW + ImmNotifyIME(CPS_COMPLETE) to send
+        text through the IME pipeline. The target window receives standard
+        WM_IME_COMPOSITION and WM_IME_ENDCOMPOSITION messages.
+        """
+        import ctypes
+        from ctypes import wintypes
+
+        imm32 = ctypes.windll.imm32
+        user32 = ctypes.windll.user32
+        kernel32 = ctypes.windll.kernel32
+
+        # Set return types
+        imm32.ImmGetContext.restype = wintypes.HANDLE
+        imm32.ImmGetContext.argtypes = [wintypes.HWND]
+        imm32.ImmReleaseContext.argtypes = [wintypes.HWND, wintypes.HANDLE]
+        imm32.ImmSetCompositionStringW.argtypes = [
+            wintypes.HANDLE, wintypes.DWORD,
+            ctypes.c_void_p, wintypes.DWORD,
+            ctypes.c_void_p, wintypes.DWORD
+        ]
+        imm32.ImmSetCompositionStringW.restype = wintypes.BOOL
+        imm32.ImmNotifyIME.argtypes = [
+            wintypes.HANDLE, wintypes.DWORD,
+            wintypes.DWORD, wintypes.DWORD
+        ]
+        imm32.ImmNotifyIME.restype = wintypes.BOOL
+
+        SCS_SETSTR = 0x0009
+        NI_COMPOSITIONSTR = 0x0015
+        CPS_COMPLETE = 0x0001
+
+        # Attach to target thread for IME context access
+        current_tid = kernel32.GetCurrentThreadId()
+        attached = False
+
+        if target_tid and target_tid != current_tid:
+            attached = user32.AttachThreadInput(current_tid, target_tid, True)
+
+        try:
+            himc = imm32.ImmGetContext(hwnd)
+            if not himc:
+                print(f"[DEBUG] ImmGetContext returned NULL for hwnd={hwnd}")
+                return False
+
+            try:
+                # Encode text as UTF-16LE for ImmSetCompositionStringW
+                text_encoded = text.encode('utf-16-le')
+                text_buf = ctypes.create_string_buffer(text_encoded)
+                byte_len = len(text_encoded)
+
+                result = imm32.ImmSetCompositionStringW(
+                    himc, SCS_SETSTR,
+                    text_buf, byte_len,
+                    None, 0
+                )
+                if not result:
+                    print(f"[DEBUG] ImmSetCompositionStringW failed")
+                    return False
+
+                # Commit the composition — target receives WM_IME_COMPOSITION + WM_IME_ENDCOMPOSITION
+                imm32.ImmNotifyIME(himc, NI_COMPOSITIONSTR, CPS_COMPLETE, 0)
+                return True
+            finally:
+                imm32.ImmReleaseContext(hwnd, himc)
+        finally:
+            if attached:
+                user32.AttachThreadInput(current_tid, target_tid, False)
+
+    def _wm_char_fallback(self, hwnd, text):
+        """Fallback: send text via PostMessage WM_CHAR (for apps that don't use IME)."""
+        import ctypes
+
+        user32 = ctypes.windll.user32
+
+        WM_CHAR = 0x0102
+        WM_KEYDOWN = 0x0100
+        WM_KEYUP = 0x0101
+        VK_RETURN = 0x0D
+
         char_delay = self.settings.get('game_mode_char_delay', 0.01)
 
         for char in text:
             if char in ('\n', '\r'):
-                # Enter key: send WM_KEYDOWN + WM_KEYUP for VK_RETURN
                 lparam_down = 1 | (0x1C << 16)
                 lparam_up = 1 | (0x1C << 16) | (1 << 30) | (1 << 31)
                 user32.PostMessageW(hwnd, WM_KEYDOWN, VK_RETURN, lparam_down)
                 time.sleep(char_delay)
                 user32.PostMessageW(hwnd, WM_KEYUP, VK_RETURN, lparam_up)
             else:
-                # All characters including Unicode/CJK: send WM_CHAR
-                user32.PostMessageW(hwnd, WM_CHAR, ord(char), 0)
+                # lParam = 1 (repeat count = 1, not 0)
+                user32.PostMessageW(hwnd, WM_CHAR, ord(char), 1)
 
             time.sleep(char_delay)
 
