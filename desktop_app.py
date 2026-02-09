@@ -3,21 +3,34 @@ Minimal Speech-to-Text Desktop Application
 Google Speech Recognition with clean UI
 """
 
-import tkinter as tk
-from tkinter import ttk, scrolledtext, messagebox
-import threading
-import pyperclip
-from pynput import keyboard
-import numpy as np
-import sounddevice as sd
+# Pre-load system DLLs for onnxruntime in frozen PyInstaller context.
+# When sounddevice's PortAudio DLLs are bundled alongside onnxruntime,
+# onnxruntime.dll fails to initialize unless its system DLL dependencies
+# are pre-loaded from System32 first.
+import sys
 import os
-import time
-import json
-import pystray
-from PIL import Image, ImageDraw
-from src.transcription import transcribe_with_google
-from src.audio_processor import process_audio
-from overlay import FloatingOverlay
+if sys.platform == "win32" and getattr(sys, 'frozen', False):
+    import ctypes
+    _k32 = ctypes.windll.kernel32
+    _k32.LoadLibraryExW.restype = ctypes.c_void_p
+    _k32.LoadLibraryExW.argtypes = [ctypes.c_wchar_p, ctypes.c_void_p, ctypes.c_uint32]
+    _sys32 = os.path.join(os.environ.get('SystemRoot', r'C:\Windows'), 'System32')
+    _base = sys._MEIPASS
+    # Pre-load system DLLs that onnxruntime needs
+    for _dep in ['dxgi.dll', 'dbghelp.dll', 'SETUPAPI.dll', 'MSVCP140.dll', 'MSVCP140_1.dll']:
+        _k32.LoadLibraryExW(os.path.join(_sys32, _dep), None, 0)
+    # Add DLL search directories
+    os.add_dll_directory(_base)
+    _ort_capi = os.path.join(_base, "onnxruntime", "capi")
+    if os.path.isdir(_ort_capi):
+        os.add_dll_directory(_ort_capi)
+    # Pre-load onnxruntime DLLs with LOAD_WITH_ALTERED_SEARCH_PATH
+    for _dll in ['onnxruntime.dll', 'onnxruntime_providers_shared.dll']:
+        for _d in [_ort_capi, _base]:
+            _p = os.path.join(_d, _dll)
+            if os.path.isfile(_p):
+                _k32.LoadLibraryExW(_p, None, 0x00000008)
+                break
 
 try:
     from src.vad import SileroVAD
@@ -25,6 +38,21 @@ try:
 except (ImportError, FileNotFoundError) as e:
     _vad_available = False
     print(f"[WARNING] Silero VAD not available ({e}), using amplitude detection")
+
+import tkinter as tk
+from tkinter import ttk, scrolledtext, messagebox
+import threading
+import pyperclip
+from pynput import keyboard
+import numpy as np
+import sounddevice as sd
+import time
+import json
+import pystray
+from PIL import Image, ImageDraw
+from src.transcription import transcribe_with_google
+from src.audio_processor import process_audio
+from overlay import FloatingOverlay
 
 SETTINGS_FILE = "settings.json"
 

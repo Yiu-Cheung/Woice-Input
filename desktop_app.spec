@@ -1,31 +1,25 @@
 # -*- mode: python ; coding: utf-8 -*-
 
-import os
-onnxruntime_dir = os.path.join('venv', 'Lib', 'site-packages', 'onnxruntime', 'capi')
+from PyInstaller.utils.hooks import collect_all
+
+# Collect ALL onnxruntime files (this is what makes it work in frozen context)
+ort_datas, ort_binaries, ort_hiddenimports = collect_all('onnxruntime')
 
 a = Analysis(
     ['desktop_app.py'],
     pathex=[],
-    binaries=[
-        (os.path.join(onnxruntime_dir, 'onnxruntime.dll'), 'onnxruntime/capi'),
-        (os.path.join(onnxruntime_dir, 'onnxruntime_providers_shared.dll'), 'onnxruntime/capi'),
-        (os.path.join(onnxruntime_dir, 'onnxruntime_pybind11_state.pyd'), 'onnxruntime/capi'),
-    ],
-    datas=[('models/silero_vad.onnx', 'models')],
+    binaries=ort_binaries,
+    datas=[('models/silero_vad.onnx', 'models')] + ort_datas,
     hiddenimports=[
         'pystray._win32',
         'sounddevice',
         'speech_recognition',
         'soundfile',
-        'onnxruntime',
-        'onnxruntime.capi',
-        'onnxruntime.capi.onnxruntime_pybind11_state',
-    ],
+    ] + ort_hiddenimports,
     hookspath=[],
     hooksconfig={},
-    runtime_hooks=[],
+    runtime_hooks=['pyi_rth_onnxruntime.py'],
     excludes=[
-        # Packages not used by desktop app
         'whisper',
         'ollama',
         'torch',
@@ -37,12 +31,10 @@ a = Analysis(
         'IPython',
         'jupyter',
         'notebook',
-        # Test modules
         'pytest',
         'unittest',
         'tkinter.test',
         'numpy.testing',
-        # Unused stdlib
         'xmlrpc',
         'pydoc',
         'doctest',
@@ -63,15 +55,7 @@ exe = EXE(
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=True,
-    upx_exclude=[
-        'vcruntime140.dll',
-        'vcruntime140_1.dll',
-        'ucrtbase.dll',
-        'python3*.dll',
-        'onnxruntime*.dll',
-        'onnxruntime*.pyd',
-    ],
+    upx=False,
     runtime_tmpdir=None,
     console=False,
     disable_windowed_traceback=False,
