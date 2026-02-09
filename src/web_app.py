@@ -6,8 +6,8 @@ Main Gradio application interface
 import gradio as gr
 import shutil
 import ollama
-from src.transcription import transcribe_audio, transcribe_audio_stream
-from src.config import GRADIO_THEME, SHARE_LINK, OLLAMA_MODEL
+from .transcription import transcribe_audio, transcribe_audio_stream
+from .config import GRADIO_THEME, SHARE_LINK, OLLAMA_MODEL
 
 
 def check_prerequisites():

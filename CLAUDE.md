@@ -45,16 +45,28 @@ openspec sync --change "<name>"
 ## Directory Structure
 
 ```
-openspec/
-├── config.yaml              # Project configuration
-├── changes/                 # Active changes
-│   ├── <change-name>/      # Individual change directory
-│   │   ├── proposal.md     # Why this change and what capabilities it adds
-│   │   ├── specs/          # Delta specs for new/modified capabilities
-│   │   ├── design.md       # Technical decisions and architecture
-│   │   └── tasks.md        # Implementation checklist
-│   └── archive/            # Completed changes (YYYY-MM-DD-<name>)
-└── specs/                   # Main capability specifications
+src/                         # All application code
+├── __init__.py
+├── __main__.py              # Entry point: python -m src
+├── desktop_app.py           # Desktop app (tkinter + tray)
+├── web_app.py               # Gradio web UI
+├── overlay.py               # Floating overlay window
+├── config.py                # Configuration constants
+├── transcription.py         # Speech recognition (Google, Whisper, Ollama)
+├── audio_processor.py       # Audio preprocessing
+└── vad.py                   # Silero VAD (voice activity detection)
+models/
+└── silero_vad.onnx          # Silero VAD ONNX model
+build_scripts/
+├── desktop_app.spec         # PyInstaller spec
+├── pyi_rth_onnxruntime.py   # Runtime hook for DLL pre-loading
+└── build.bat                # Build script
+docs/                        # Documentation
+openspec/                    # OpenSpec workflow
+├── config.yaml
+├── changes/
+│   └── <change-name>/
+└── specs/
     └── <capability>/
         └── spec.md
 ```

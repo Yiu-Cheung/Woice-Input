@@ -1,15 +1,19 @@
 # -*- mode: python ; coding: utf-8 -*-
 
+import os
 from PyInstaller.utils.hooks import collect_all
+
+# Project root (one level up from build_scripts/)
+ROOT = os.path.abspath(os.path.join(SPECPATH, '..'))
 
 # Collect ALL onnxruntime files (this is what makes it work in frozen context)
 ort_datas, ort_binaries, ort_hiddenimports = collect_all('onnxruntime')
 
 a = Analysis(
-    ['desktop_app.py'],
-    pathex=[],
+    [os.path.join(ROOT, 'src', 'desktop_app.py')],
+    pathex=[ROOT],
     binaries=ort_binaries,
-    datas=[('models/silero_vad.onnx', 'models')] + ort_datas,
+    datas=[(os.path.join(ROOT, 'models', 'silero_vad.onnx'), 'models')] + ort_datas,
     hiddenimports=[
         'pystray._win32',
         'sounddevice',
@@ -18,7 +22,7 @@ a = Analysis(
     ] + ort_hiddenimports,
     hookspath=[],
     hooksconfig={},
-    runtime_hooks=['pyi_rth_onnxruntime.py'],
+    runtime_hooks=[os.path.join(SPECPATH, 'pyi_rth_onnxruntime.py')],
     excludes=[
         'whisper',
         'ollama',

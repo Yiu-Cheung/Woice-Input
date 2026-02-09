@@ -29,8 +29,8 @@ wheels/
 
 # PyInstaller
 *.manifest
-# Keep desktop_app.spec tracked (needed for exe builds)
-!desktop_app.spec
+# Keep build spec tracked (needed for exe builds)
+!build_scripts/desktop_app.spec
 
 # Unit test / coverage
 htmlcov/
