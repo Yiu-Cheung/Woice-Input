@@ -33,7 +33,19 @@ if sys.platform == "win32" and getattr(sys, 'frozen', False):
                 break
 
 try:
-    from .vad import SileroVAD
+    from .transcription import transcribe_with_google
+    from .audio_processor import process_audio
+    from .overlay import FloatingOverlay
+except ImportError:
+    from src.transcription import transcribe_with_google
+    from src.audio_processor import process_audio
+    from src.overlay import FloatingOverlay
+
+try:
+    try:
+        from .vad import SileroVAD
+    except ImportError:
+        from src.vad import SileroVAD
     _vad_available = True
 except (ImportError, FileNotFoundError) as e:
     _vad_available = False
@@ -50,9 +62,6 @@ import time
 import json
 import pystray
 from PIL import Image, ImageDraw
-from .transcription import transcribe_with_google
-from .audio_processor import process_audio
-from .overlay import FloatingOverlay
 
 SETTINGS_FILE = "settings.json"
 
