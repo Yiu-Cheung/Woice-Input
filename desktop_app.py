@@ -256,7 +256,6 @@ class SettingsDialog:
             try:
                 with open(SETTINGS_FILE, 'w') as f:
                     json.dump(self.settings, f, indent=2)
-                messagebox.showinfo("Success", "Settings saved successfully!")
             except Exception as e:
                 messagebox.showerror("Error", f"Failed to save settings: {str(e)}")
                 return
@@ -661,24 +660,29 @@ class SimpleSTTApp:
         else:
             return np.max(np.abs(audio_chunk)) >= self.settings['silence_threshold']
 
+    def _update_tray(self):
+        """Refresh tray icon and menu state."""
+        if self.tray_icon:
+            is_active = self.continuous_mode or self.is_recording
+            self.tray_icon.icon = self._icon_recording if is_active else self._icon_idle
+            self.tray_icon.update_menu()
+
     def start(self):
         """Start continuous mode or recording"""
         print(f"[DEBUG] start() called, continuous={self.settings['continuous']}")
-        if self.tray_icon:
-            self.tray_icon.icon = self._icon_recording
         if self.settings['continuous']:
             self.start_continuous_mode()
         else:
             self.start_recording()
+        self._update_tray()
 
     def stop(self):
         """Stop continuous mode or recording"""
-        if self.tray_icon:
-            self.tray_icon.icon = self._icon_idle
         if self.settings['continuous']:
             self.stop_continuous_mode()
         else:
             self.stop_recording()
+        self._update_tray()
 
     def toggle_recording(self):
         """Hotkey toggle - works for both manual and continuous modes"""

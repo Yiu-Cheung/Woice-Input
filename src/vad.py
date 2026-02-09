@@ -5,6 +5,7 @@ Provides voice activity detection by running the Silero VAD model directly.
 
 import numpy as np
 import os
+import sys
 
 
 class SileroVAD:
@@ -14,10 +15,12 @@ class SileroVAD:
         import onnxruntime
 
         if model_path is None:
-            model_path = os.path.join(
-                os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                "models", "silero_vad.onnx"
-            )
+            # Handle PyInstaller frozen exe (sys._MEIPASS) vs normal Python
+            if getattr(sys, 'frozen', False):
+                base_dir = sys._MEIPASS
+            else:
+                base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            model_path = os.path.join(base_dir, "models", "silero_vad.onnx")
 
         if not os.path.exists(model_path):
             raise FileNotFoundError(f"Silero VAD model not found at {model_path}")
