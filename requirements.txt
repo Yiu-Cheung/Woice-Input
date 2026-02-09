@@ -1,12 +1,11 @@
 # Core audio processing
 numpy>=1.24.0
 soundfile>=0.12.1
-scipy>=1.11.0
 SpeechRecognition>=3.10.0
+onnxruntime>=1.16.0
 
 # Desktop app UI & system integration
 pyperclip>=1.8.2
-pyautogui>=0.9.54
 pynput>=1.7.6
 sounddevice>=0.4.6
 pystray>=0.19.4

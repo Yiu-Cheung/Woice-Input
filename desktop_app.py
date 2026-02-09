@@ -7,7 +7,6 @@ import tkinter as tk
 from tkinter import ttk, scrolledtext, messagebox
 import threading
 import pyperclip
-import pyautogui
 from pynput import keyboard
 import numpy as np
 import sounddevice as sd
@@ -19,6 +18,13 @@ from PIL import Image, ImageDraw
 from src.transcription import transcribe_with_google
 from src.audio_processor import process_audio
 from overlay import FloatingOverlay
+
+try:
+    from src.vad import SileroVAD
+    _vad_available = True
+except (ImportError, FileNotFoundError) as e:
+    _vad_available = False
+    print(f"[WARNING] Silero VAD not available ({e}), using amplitude detection")
 
 SETTINGS_FILE = "settings.json"
 
@@ -119,6 +125,23 @@ class SettingsDialog:
         self.idle_timeout_var = tk.StringVar(value=str(settings.get('idle_timeout', 10)))
         idle_entry = tk.Entry(idle_frame, textvariable=self.idle_timeout_var, width=10)
         idle_entry.pack(pady=5, anchor='w')
+
+        # VAD threshold
+        vad_frame = tk.Frame(self.dialog)
+        vad_frame.pack(pady=5, padx=20, fill=tk.X)
+
+        tk.Label(vad_frame, text="VAD threshold (0.0-1.0, speech detection sensitivity):", font=("Arial", 10)).pack(anchor='w')
+        self.vad_threshold_var = tk.DoubleVar(value=settings.get('vad_threshold', 0.5))
+        vad_slider = tk.Scale(
+            vad_frame,
+            from_=0.0,
+            to=1.0,
+            resolution=0.05,
+            orient=tk.HORIZONTAL,
+            variable=self.vad_threshold_var,
+            length=200
+        )
+        vad_slider.pack(pady=5, anchor='w')
 
         # Overlay settings
         overlay_frame = tk.LabelFrame(self.dialog, text="Floating Overlay", font=("Arial", 10, "bold"), padx=10, pady=10)
@@ -221,6 +244,7 @@ class SettingsDialog:
             self.settings['pause_threshold'] = pause_threshold
             self.settings['silence_threshold'] = silence_threshold
             self.settings['idle_timeout'] = idle_timeout
+            self.settings['vad_threshold'] = self.vad_threshold_var.get()
 
             # Save overlay settings
             self.settings['overlay_enabled'] = self.overlay_enabled_var.get()
@@ -273,6 +297,17 @@ class SimpleSTTApp:
         self.last_transcription = ""  # Track last transcription to avoid duplicates
         self.transcription_lock = threading.Lock()  # Prevent concurrent insertions
 
+        # Voice Activity Detection (Silero VAD)
+        self.vad = None
+        self.vad_available = _vad_available
+        if self.vad_available:
+            try:
+                self.vad = SileroVAD()
+                print("[DEBUG] Silero VAD initialized")
+            except Exception as e:
+                self.vad_available = False
+                print(f"[WARNING] Silero VAD init failed: {e}, using amplitude detection")
+
         # Overlay window (created lazily on first toggle)
         self.overlay_window = None
 
@@ -315,6 +350,7 @@ class SimpleSTTApp:
             'game_mode': False,  # Use PostMessage/WM_CHAR instead of SendInput (for games with anti-cheat)
             'game_mode_char_delay': 0.01,  # Delay between characters in game mode (seconds)
             'idle_timeout': 10,  # Auto-stop recording after N seconds of silence (0 = disabled)
+            'vad_threshold': 0.5,  # Silero VAD speech probability threshold (0.0-1.0)
             'overlay_enabled': False,
             'overlay_opacity': 0.90,
             'overlay_width': 400,
@@ -604,6 +640,27 @@ class SimpleSTTApp:
         """Open settings dialog"""
         SettingsDialog(self.root, self.settings)
 
+    def _check_voice_activity(self, audio_chunk):
+        """Check if audio chunk contains speech using Silero VAD or amplitude fallback.
+
+        Args:
+            audio_chunk: 1D numpy float32 array of audio samples
+
+        Returns:
+            bool: True if speech detected
+        """
+        if self.vad_available:
+            vad_threshold = self.settings.get('vad_threshold', 0.5)
+            max_prob = 0.0
+            # Process in 512-sample frames (required by Silero VAD)
+            for i in range(0, len(audio_chunk) - 511, 512):
+                frame = audio_chunk[i:i + 512]
+                prob = self.vad.process(frame)
+                max_prob = max(max_prob, prob)
+            return max_prob >= vad_threshold
+        else:
+            return np.max(np.abs(audio_chunk)) >= self.settings['silence_threshold']
+
     def start(self):
         """Start continuous mode or recording"""
         print(f"[DEBUG] start() called, continuous={self.settings['continuous']}")
@@ -675,9 +732,8 @@ class SimpleSTTApp:
                     sd.sleep(int(check_interval * 1000))
                     # Idle auto-stop for manual recording
                     if idle_timeout > 0 and self.audio_data:
-                        latest = self.audio_data[-1]
-                        max_amp = np.max(np.abs(latest))
-                        if max_amp >= silence_threshold:
+                        latest = self.audio_data[-1].flatten()
+                        if self._check_voice_activity(latest):
                             idle_duration = 0.0
                         else:
                             idle_duration += check_interval
@@ -790,10 +846,14 @@ class SimpleSTTApp:
     def _continuous_loop(self):
         """Continuous recording loop with Voice Activity Detection"""
         print("[DEBUG] _continuous_loop() started")
+        # Reset VAD hidden state for a fresh stream
+        if self.vad_available:
+            self.vad.reset_states()
         pause_threshold = self.settings['pause_threshold']
         silence_threshold = self.settings['silence_threshold']
         idle_timeout = self.settings.get('idle_timeout', 10)
-        print(f"[DEBUG] Continuous settings: pause={pause_threshold}s, silence={silence_threshold}, idle_timeout={idle_timeout}s")
+        vad_mode = "Silero VAD" if self.vad_available else "amplitude"
+        print(f"[DEBUG] Continuous settings: pause={pause_threshold}s, silence={silence_threshold}, idle_timeout={idle_timeout}s, detection={vad_mode}")
 
         audio_buffer = []  # Accumulates audio while speaking
         silence_buffer = []  # Accumulates audio during silence
@@ -833,16 +893,15 @@ class SimpleSTTApp:
                     chunk = np.concatenate(audio_buffer, axis=0).flatten()
                     audio_buffer.clear()
 
-                    # Check if chunk contains voice (above silence threshold)
-                    max_amplitude = np.max(np.abs(chunk))
-                    is_voice = max_amplitude >= silence_threshold
+                    # Check if chunk contains voice (Silero VAD or amplitude fallback)
+                    is_voice = self._check_voice_activity(chunk)
 
                     if is_voice:
                         # Voice detected — reset idle timer
                         idle_duration = 0.0
                         if not is_speaking:
                             # Start of new speech
-                            print(f"[DEBUG] Voice detected! amplitude={max_amplitude:.4f}, threshold={silence_threshold}")
+                            print(f"[DEBUG] Voice detected! (detection={vad_mode})")
                             is_speaking = True
                             silence_buffer = []
                             silence_duration = 0.0
