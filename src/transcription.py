@@ -2,11 +2,8 @@
 Transcription module handling Whisper, Google Speech Recognition, and Ollama integration.
 """
 
-import whisper
-import ollama
 import os
 import speech_recognition as sr
-from .config import WHISPER_MODEL, OLLAMA_MODEL, OLLAMA_HOST, OLLAMA_TIMEOUT
 from .audio_processor import process_audio
 
 
@@ -14,7 +11,7 @@ from .audio_processor import process_audio
 _whisper_model = None
 
 
-def load_whisper_model(model_name=WHISPER_MODEL):
+def load_whisper_model(model_name=None):
     """
     Load Whisper model (cached for performance).
     Uses NVIDIA GPU if available, falls back to CPU.
@@ -25,6 +22,12 @@ def load_whisper_model(model_name=WHISPER_MODEL):
     Returns:
         Whisper model instance
     """
+    import whisper
+    from .config import WHISPER_MODEL
+
+    if model_name is None:
+        model_name = WHISPER_MODEL
+
     global _whisper_model
 
     if _whisper_model is None:
@@ -73,6 +76,8 @@ def transcribe_with_whisper(audio_path, language=None):
             if "nan" in error_msg.lower() or "cuda" in error_msg.lower() or "constraint" in error_msg.lower():
                 # Reload model on CPU and retry
                 import torch
+                import whisper
+                from .config import WHISPER_MODEL
                 global _whisper_model
                 print("⚠ GPU error detected (NaN/CUDA issue), falling back to CPU...")
                 _whisper_model = whisper.load_model(WHISPER_MODEL, device="cpu")
@@ -173,6 +178,9 @@ def process_with_ollama(text, task="improve"):
     prompt = prompts.get(task, prompts["improve"])
 
     try:
+        import ollama
+        from .config import OLLAMA_MODEL, OLLAMA_TIMEOUT
+
         # Check if Ollama is accessible
         try:
             ollama.list()

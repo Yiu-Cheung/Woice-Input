@@ -5,7 +5,6 @@ Handles format conversion, resampling, normalization, and validation.
 
 import numpy as np
 import soundfile as sf
-from scipy import signal
 import tempfile
 import os
 from .config import TARGET_SAMPLE_RATE, MAX_AUDIO_LENGTH
@@ -31,8 +30,9 @@ def convert_to_16khz_mono(audio_data, sample_rate):
     if sample_rate != TARGET_SAMPLE_RATE:
         # Calculate number of samples after resampling
         num_samples = int(len(audio_data) * TARGET_SAMPLE_RATE / sample_rate)
-        # Use scipy.signal.resample for Fourier-based resampling
-        audio_data = signal.resample(audio_data, num_samples)
+        # Use numpy linear interpolation for lightweight resampling
+        old_indices = np.linspace(0, len(audio_data) - 1, num_samples)
+        audio_data = np.interp(old_indices, np.arange(len(audio_data)), audio_data).astype(np.float32)
 
     return audio_data, TARGET_SAMPLE_RATE
 

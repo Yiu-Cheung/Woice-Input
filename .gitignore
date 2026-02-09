@@ -29,7 +29,8 @@ wheels/
 
 # PyInstaller
 *.manifest
-*.spec
+# Keep desktop_app.spec tracked (needed for exe builds)
+!desktop_app.spec
 
 # Unit test / coverage
 htmlcov/
@@ -63,5 +64,3 @@ Thumbs.db
 *.flac
 temp_audio/
 settings.json
-NUL
-=3.10.0
