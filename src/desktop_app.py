@@ -1197,9 +1197,53 @@ class SimpleSTTApp:
         self.root.destroy()
 
 
+def _acquire_single_instance_lock():
+    """Ensure only one instance of the app runs at a time (Windows only).
+
+    Uses a named mutex. Returns the mutex handle if acquired,
+    or None if another instance is already running.
+    """
+    if sys.platform != "win32":
+        return True
+
+    import ctypes
+    kernel32 = ctypes.windll.kernel32
+    ERROR_ALREADY_EXISTS = 183
+    MUTEX_NAME = "Global\\SpeechToText_SingleInstance"
+
+    handle = kernel32.CreateMutexW(None, False, MUTEX_NAME)
+    if kernel32.GetLastError() == ERROR_ALREADY_EXISTS:
+        if handle:
+            kernel32.CloseHandle(handle)
+        return None
+
+    return handle
+
+
 def main():
-    app = SimpleSTTApp()
-    app.run()
+    mutex = _acquire_single_instance_lock()
+    if mutex is None:
+        # Another instance is already running
+        if sys.platform == "win32":
+            import ctypes
+            ctypes.windll.user32.MessageBoxW(
+                None,
+                "SpeechToText is already running.\nCheck the system tray.",
+                "SpeechToText",
+                0x40  # MB_ICONINFORMATION
+            )
+        print("Another instance is already running. Exiting.")
+        sys.exit(0)
+
+    try:
+        app = SimpleSTTApp()
+        app.run()
+    finally:
+        # Release mutex
+        if sys.platform == "win32" and mutex is not True:
+            import ctypes
+            ctypes.windll.kernel32.ReleaseMutex(mutex)
+            ctypes.windll.kernel32.CloseHandle(mutex)
 
 
 if __name__ == "__main__":
