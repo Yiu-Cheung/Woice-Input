@@ -293,9 +293,6 @@ class SimpleSTTApp:
         self.sample_rate = 16000
         self.continuous_mode = False
         self.continuous_thread = None
-        self.last_transcription = ""  # Track last transcription to avoid duplicates
-        self.transcription_lock = threading.Lock()  # Prevent concurrent insertions
-
         # Voice Activity Detection (Silero VAD)
         self.vad = None
         self.vad_available = _vad_available
@@ -842,7 +839,6 @@ class SimpleSTTApp:
     def stop_continuous_mode(self):
         """Stop continuous transcription"""
         self.continuous_mode = False
-        self.last_transcription = ""  # Reset to allow same text in next session
         self.start_btn.config(state='normal')
         self.stop_btn.config(state='disabled')
         self.status_var.set("Continuous mode stopped")
@@ -1016,28 +1012,19 @@ class SimpleSTTApp:
                 pass
 
             if transcription.strip():
-                # Use lock to prevent race condition with concurrent processing
-                with self.transcription_lock:
-                    print(f"[DEBUG] Checking duplicate: '{transcription}' vs '{self.last_transcription}'")
-                    # Check for duplicate (avoid repeating same transcription)
-                    if transcription != self.last_transcription:
-                        self.last_transcription = transcription
+                def update_ui():
+                    print(f"[DEBUG] Inserting: '{transcription}'")
+                    self.output_text.insert(tk.END, transcription + " ")
+                    self.output_text.see(tk.END)
 
-                        def update_ui():
-                            print(f"[DEBUG] Inserting: '{transcription}'")
-                            self.output_text.insert(tk.END, transcription + " ")
-                            self.output_text.see(tk.END)
+                    # Paste BEFORE overlay update (overlay show can affect focus)
+                    self.paste_to_active_window(transcription + " ")
 
-                            # Paste BEFORE overlay update (overlay show can affect focus)
-                            self.paste_to_active_window(transcription + " ")
+                    # Update overlay after paste
+                    if self.overlay_window:
+                        self.overlay_window.update_text(transcription + " ")
 
-                            # Update overlay after paste
-                            if self.overlay_window:
-                                self.overlay_window.update_text(transcription + " ")
-
-                        self._ui_update(update_ui)
-                    else:
-                        print(f"[DEBUG] SKIPPED duplicate: '{transcription}'")
+                self._ui_update(update_ui)
 
         except ValueError as e:
             print(f"[DEBUG] ValueError: {e}")
@@ -1146,8 +1133,6 @@ class SimpleSTTApp:
     def clear_text(self):
         """Clear output text"""
         self.output_text.delete(1.0, tk.END)
-        self.last_transcription = ""  # Reset duplicate detection
-
         # Clear overlay if exists
         if self.overlay_window:
             self.overlay_window.clear_text()
