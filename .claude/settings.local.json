@@ -1,0 +1,31 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(\"venv\\\\Scripts\\\\pip.exe\" install -r requirements.txt)",
+      "Bash(\"venv\\\\Scripts\\\\python.exe\":*)",
+      "Bash(timeout 5 cat:*)",
+      "Bash(git init:*)",
+      "Bash(git commit:*)",
+      "Bash(git remote add:*)",
+      "Bash(venvScriptspython.exe -c \"import py_compile; py_compile.compile\\(''desktop_app.py'', doraise=True\\); print\\(''Syntax OK''\\)\")",
+      "Bash(\"f:\\\\AI\\\\speech to text\\\\venv\\\\Scripts\\\\python.exe\" -c \"import py_compile; py_compile.compile\\(r''f:\\\\AI\\\\speech to text\\\\desktop_app.py'', doraise=True\\); print\\(''Syntax OK''\\)\")",
+      "Bash(venv/Scripts/pip install:*)",
+      "Bash(venv/Scripts/python:*)",
+      "Bash(venv/Scripts/pip list --format=columns)",
+      "Bash(git reset:*)",
+      "Bash(powershell:*)",
+      "Bash(venv/Scripts/pyinstaller desktop_app.spec --clean)",
+      "WebFetch(domain:pypi.org)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:picovoice.ai)",
+      "Bash(openspec new change:*)",
+      "Bash(\"venv\\\\Scripts\\\\python.exe\" --version)",
+      "Bash(\"venv\\\\Scripts\\\\pip.exe\" install silero-vad-lite)",
+      "Bash(\"venv\\\\Scripts\\\\pip.exe\" install:*)",
+      "Bash(\"venv\\\\Scripts\\\\pip.exe\" debug:*)",
+      "Bash(\"venv\\\\Scripts\\\\python.exe\" -c \"import urllib.request; urllib.request.urlretrieve\\(''https://raw.githubusercontent.com/snakers4/silero-vad/master/src/silero_vad/data/silero_vad.onnx'', ''models/silero_vad.onnx''\\); print\\(''Downloaded''\\)\")",
+      "Bash(\"venv\\\\Scripts\\\\python.exe\" -c:*)",
+      "Bash(\"venv\\\\Scripts\\\\pyinstaller.exe\" desktop_app.spec --clean)"
+    ]
+  }
+}
