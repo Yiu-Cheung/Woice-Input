@@ -219,6 +219,16 @@ class SettingsDialog:
         )
         offline_cb.pack(pady=5, padx=20, anchor='w')
 
+        # Sound cues (start/stop beep)
+        self.sound_cues_var = tk.BooleanVar(value=settings.get('sound_cues', True))
+        sound_cb = tk.Checkbutton(
+            self.dialog,
+            text="Sound cues (beep on start / stop)",
+            variable=self.sound_cues_var,
+            font=("Arial", 10)
+        )
+        sound_cb.pack(pady=5, padx=20, anchor='w')
+
         # Overlay settings
         overlay_frame = tk.LabelFrame(self.dialog, text="Floating Overlay", font=("Arial", 10, "bold"), padx=10, pady=10)
         overlay_frame.pack(pady=10, padx=20, fill=tk.X)
@@ -349,6 +359,7 @@ class SettingsDialog:
             self.settings['vad_exit_threshold'] = vad_exit_threshold
             self.settings['short_utterance_floor'] = short_utterance_floor
             self.settings['offline_fallback'] = self.offline_fallback_var.get()
+            self.settings['sound_cues'] = self.sound_cues_var.get()
 
             # Save overlay settings
             self.settings['overlay_enabled'] = self.overlay_enabled_var.get()
@@ -470,6 +481,7 @@ class SimpleSTTApp:
             'vad_exit_threshold': 0.4 - VAD_EXIT_MARGIN,  # Hysteresis: stay capturing until prob drops below this (0.25)
             'short_utterance_floor': SHORT_UTTERANCE_FLOOR,  # Min voiced duration (s) to keep a segment
             'offline_fallback': False,  # Use local Whisper when online recognizer fails after retries
+            'sound_cues': True,  # Play a short beep on start (high) / stop (low)
             'overlay_enabled': False,
             'overlay_opacity': 0.90,
             'overlay_width': 400,
@@ -916,6 +928,25 @@ class SimpleSTTApp:
             i += VAD_FRAME_SAMPLES
         return max_prob, buf[i:]
 
+    def _play_cue(self, kind):
+        """Play a short start/stop beep (Windows only), if enabled in settings.
+
+        start -> higher pitch, stop -> lower pitch. Runs off the caller thread
+        since winsound.Beep is blocking.
+        """
+        if not self.settings.get('sound_cues', True) or sys.platform != 'win32':
+            return
+        freq = 880 if kind == 'start' else 440
+
+        def _beep():
+            try:
+                import winsound
+                winsound.Beep(freq, 120)
+            except Exception as e:
+                print(f"[DEBUG] sound cue failed: {e}")
+
+        threading.Thread(target=_beep, daemon=True).start()
+
     def _update_tray(self):
         """Refresh tray icon, tooltip, and menu state."""
         if self.tray_icon:
@@ -936,6 +967,7 @@ class SimpleSTTApp:
             self.start_continuous_mode()
         else:
             self.start_recording()
+        self._play_cue('start')
         self._update_tray()
 
     def stop(self):
@@ -944,6 +976,7 @@ class SimpleSTTApp:
             self.stop_continuous_mode()
         else:
             self.stop_recording()
+        self._play_cue('stop')
         self._update_tray()
 
     def toggle_recording(self):

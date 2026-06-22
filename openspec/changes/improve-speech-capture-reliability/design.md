@@ -31,6 +31,7 @@ This change is delivered in two stages so low-risk tuning lands before the threa
 A single `sd.InputStream` opens at app start (or first use) and stays open. Its callback always pushes blocks into a fixed-capacity `collections.deque` (the pre-roll, sized to ≥500ms = 8000 samples). Sessions read from this shared buffer; on speech onset the deque snapshot is prepended to the captured audio.
 **Why:** one mechanism fixes onset loss in *both* modes — manual no longer waits for stream open, continuous recovers pre-trigger audio. A ring buffer is the standard VAD "lookback/speech_pad" technique.
 **Alternative considered:** open stream eagerly but keep per-mode logic separate — rejected: duplicates buffering and leaves continuous-mode onset loss unsolved.
+**Side effect:** opening/closing a stream per session previously triggered the Windows device-activation chime on each start/stop. With one always-open stream that chime now fires only once at launch. To preserve audible start/stop feedback we add an explicit cue (`sound_cues`, default on): a short high beep on start, low beep on stop via `winsound` (Windows only, run off-thread).
 
 ### Decision 3: Fixed `blocksize=512` + sample-accurate carry-over
 Open the stream with `blocksize=512` (or a multiple) and maintain a leftover-sample carry buffer so VAD always receives whole, contiguous 512-frames with nothing dropped.

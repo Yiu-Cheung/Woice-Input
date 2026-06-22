@@ -32,6 +32,7 @@
 - [x] 5.2 Keep the stream open across session start/stop; route start/stop to consume from the shared buffer rather than opening/closing the stream
 - [x] 5.3 Add open-failure handling: fall back to a supported block size, then host-default; log and surface to status
 - [x] 5.4 Update tray/UI to reflect that the mic stream is active; close the stream cleanly in `on_closing`
+- [x] 5.5 Add explicit start/stop sound cue (`sound_cues`, default on; high beep start / low beep stop via `winsound`) to replace the device-activation chime lost to the always-on stream; add Settings toggle
 
 ## 6. Stage 2 — Pre-roll ring buffer + onset preservation
 
