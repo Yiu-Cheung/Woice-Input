@@ -634,10 +634,10 @@ class SimpleSTTApp:
 
     def _create_tray_icon(self):
         """Create system tray icon"""
-        # Create idle icon (green) and recording icon (red)
+        # Create idle icon (grey) and recording icon (red)
         self._icon_idle = Image.new('RGB', (64, 64), color='white')
         draw = ImageDraw.Draw(self._icon_idle)
-        draw.ellipse([16, 16, 48, 48], fill='#4CAF50')
+        draw.ellipse([16, 16, 48, 48], fill='#9E9E9E')
 
         self._icon_recording = Image.new('RGB', (64, 64), color='white')
         draw = ImageDraw.Draw(self._icon_recording)
