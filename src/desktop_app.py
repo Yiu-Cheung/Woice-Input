@@ -72,7 +72,70 @@ import json
 import pystray
 from PIL import Image, ImageDraw
 
-SETTINGS_FILE = "settings.json"
+
+def _app_dir():
+    """Directory the app should anchor data files to, independent of cwd.
+
+    Frozen exe -> the exe's folder; source -> the project root (parent of src/).
+    Anchoring SETTINGS_FILE here keeps settings working no matter how the app is
+    launched (e.g. auto-start at login, where cwd is not the project dir).
+    """
+    if getattr(sys, 'frozen', False):
+        return os.path.dirname(sys.executable)
+    return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+SETTINGS_FILE = os.path.join(_app_dir(), "settings.json")
+
+# --- Windows auto-start (per-user Run key; no admin required) ---
+_AUTOSTART_RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
+_AUTOSTART_VALUE_NAME = "SpeechToText"
+
+
+def _autostart_command():
+    """Command Windows runs at login to launch this app (cwd-independent)."""
+    if getattr(sys, 'frozen', False):
+        return f'"{sys.executable}"'
+    # Source mode: mirror run.bat (set project as working dir, run via pythonw
+    # so there is no console window) so `-m src` and settings.json both resolve.
+    exe_dir = os.path.dirname(sys.executable)
+    pythonw = os.path.join(exe_dir, 'pythonw.exe')
+    python_exe = pythonw if os.path.exists(pythonw) else sys.executable
+    project_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    return f'cmd /c start "" /D "{project_dir}" "{python_exe}" -m src'
+
+
+def is_autostart_enabled():
+    """True if the login Run-key entry exists (Windows only)."""
+    if sys.platform != 'win32':
+        return False
+    try:
+        import winreg
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, _AUTOSTART_RUN_KEY) as key:
+            winreg.QueryValueEx(key, _AUTOSTART_VALUE_NAME)
+        return True
+    except OSError:
+        return False
+
+
+def set_autostart(enabled):
+    """Add or remove the login Run-key entry. Returns True on success."""
+    if sys.platform != 'win32':
+        return False
+    try:
+        import winreg
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, _AUTOSTART_RUN_KEY, 0, winreg.KEY_SET_VALUE) as key:
+            if enabled:
+                winreg.SetValueEx(key, _AUTOSTART_VALUE_NAME, 0, winreg.REG_SZ, _autostart_command())
+            else:
+                try:
+                    winreg.DeleteValue(key, _AUTOSTART_VALUE_NAME)
+                except FileNotFoundError:
+                    pass
+        return True
+    except OSError as e:
+        print(f"[DEBUG] set_autostart failed: {e}")
+        return False
 
 
 class SettingsDialog:
@@ -229,6 +292,16 @@ class SettingsDialog:
         )
         sound_cb.pack(pady=5, padx=20, anchor='w')
 
+        # Auto-start on Windows login (reflects the actual registry state)
+        self.auto_start_var = tk.BooleanVar(value=is_autostart_enabled())
+        autostart_cb = tk.Checkbutton(
+            self.dialog,
+            text="Start automatically on Windows login",
+            variable=self.auto_start_var,
+            font=("Arial", 10)
+        )
+        autostart_cb.pack(pady=5, padx=20, anchor='w')
+
         # Overlay settings
         overlay_frame = tk.LabelFrame(self.dialog, text="Floating Overlay", font=("Arial", 10, "bold"), padx=10, pady=10)
         overlay_frame.pack(pady=10, padx=20, fill=tk.X)
@@ -360,6 +433,9 @@ class SettingsDialog:
             self.settings['short_utterance_floor'] = short_utterance_floor
             self.settings['offline_fallback'] = self.offline_fallback_var.get()
             self.settings['sound_cues'] = self.sound_cues_var.get()
+            self.settings['auto_start'] = self.auto_start_var.get()
+            # Apply auto-start to the Windows registry
+            set_autostart(self.auto_start_var.get())
 
             # Save overlay settings
             self.settings['overlay_enabled'] = self.overlay_enabled_var.get()
@@ -482,6 +558,7 @@ class SimpleSTTApp:
             'short_utterance_floor': SHORT_UTTERANCE_FLOOR,  # Min voiced duration (s) to keep a segment
             'offline_fallback': False,  # Use local Whisper when online recognizer fails after retries
             'sound_cues': True,  # Play a short beep on start (high) / stop (low)
+            'auto_start': False,  # Launch automatically on Windows login (registry Run key)
             'overlay_enabled': False,
             'overlay_opacity': 0.90,
             'overlay_width': 400,
@@ -581,6 +658,11 @@ class SimpleSTTApp:
                 self.toggle_game_mode,
                 checked=lambda item: self.settings.get('game_mode', False)
             ),
+            pystray.MenuItem(
+                "Start on login",
+                self.toggle_autostart,
+                checked=lambda item: is_autostart_enabled()
+            ),
             pystray.MenuItem("Settings", self.open_settings_from_tray),
             pystray.Menu.SEPARATOR,
             pystray.MenuItem("Exit", self.quit_app)
@@ -641,6 +723,22 @@ class SimpleSTTApp:
                 json.dump(self.settings, f, indent=2)
         except Exception:
             pass  # Ignore save errors
+
+    def toggle_autostart(self, icon=None, item=None):
+        """Toggle auto-start on login from tray"""
+        self.root.after(0, self._toggle_autostart_impl)
+
+    def _toggle_autostart_impl(self):
+        """Implementation of toggle auto-start (runs in main thread)"""
+        new_state = not is_autostart_enabled()
+        if set_autostart(new_state):
+            self.settings['auto_start'] = new_state
+            try:
+                with open(SETTINGS_FILE, 'w') as f:
+                    json.dump(self.settings, f, indent=2)
+            except Exception:
+                pass  # Ignore save errors
+        self._update_tray()
 
     def open_settings_from_tray(self, icon=None, item=None):
         """Open settings dialog from tray"""
