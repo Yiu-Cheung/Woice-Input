@@ -138,6 +138,37 @@ def set_autostart(enabled):
         return False
 
 
+def _default_settings():
+    """Return a fresh dict of default settings (single source of truth).
+
+    Used both for first-run defaults and for the Settings "Reset to Defaults"
+    button, so the two never drift apart.
+    """
+    return {
+        'language': 'yue',
+        'continuous': False,
+        'pause_threshold': 1.5,  # Seconds of silence before processing
+        'silence_threshold': 0.01,  # Audio amplitude threshold for silence detection
+        'game_mode': False,  # Use PostMessage/WM_CHAR instead of SendInput (for games with anti-cheat)
+        'game_mode_char_delay': 0.01,  # Delay between characters in game mode (seconds)
+        'idle_timeout': 10,  # Auto-stop recording after N seconds of silence (0 = disabled)
+        'vad_threshold': 0.4,  # Silero VAD speech probability threshold to ENTER speech (0.0-1.0)
+        'vad_exit_threshold': 0.4 - VAD_EXIT_MARGIN,  # Hysteresis: stay capturing until prob drops below this (0.25)
+        'short_utterance_floor': SHORT_UTTERANCE_FLOOR,  # Min voiced duration (s) to keep a segment
+        'offline_fallback': False,  # Use local Whisper when online recognizer fails after retries
+        'sound_cues': True,  # Play a short beep on start (high) / stop (low)
+        'auto_start': False,  # Launch automatically on login (registry Run key / LaunchAgent)
+        'overlay_enabled': False,
+        'overlay_opacity': 0.90,
+        'overlay_width': 400,
+        'overlay_height': 150,
+        'overlay_position': 'bottom-right',
+        'overlay_max_lines': 10,
+        'overlay_font_size': 11,
+        'microphone': 'auto',
+    }
+
+
 class SettingsDialog:
     def __init__(self, parent, settings):
         self.settings = settings
@@ -379,6 +410,16 @@ class SettingsDialog:
         )
         cancel_btn.pack(side=tk.LEFT, padx=10)
 
+        reset_btn = tk.Button(
+            btn_frame,
+            text="↺ Reset to Defaults",
+            command=self.reset_defaults,
+            font=("Arial", 10),
+            width=16,
+            height=2
+        )
+        reset_btn.pack(side=tk.LEFT, padx=10)
+
         # Auto-fit the window to its content so every control (incl. Save/Cancel)
         # is visible without manual resizing.
         self.dialog.update_idletasks()
@@ -392,6 +433,33 @@ class SettingsDialog:
         y = max(0, (screen_height - height) // 2)
         self.dialog.geometry(f"{width}x{height}+{x}+{y}")
         self.dialog.minsize(width, min(height, 500))
+
+    def reset_defaults(self):
+        """Restore all form controls to default values (review, then Save to apply)."""
+        if not messagebox.askyesno(
+            "Reset Settings",
+            "Restore all settings to their default values?\n"
+            "Click Save Settings afterwards to apply."
+        ):
+            return
+        d = _default_settings()
+        self.language_var.set(d['language'])
+        self.microphone_var.set(d['microphone'])
+        self.game_mode_var.set(d['game_mode'])
+        self.continuous_var.set(d['continuous'])
+        self.pause_var.set(str(d['pause_threshold']))
+        self.silence_var.set(str(d['silence_threshold']))
+        self.idle_timeout_var.set(str(d['idle_timeout']))
+        self.vad_threshold_var.set(d['vad_threshold'])
+        self.vad_exit_threshold_var.set(d['vad_exit_threshold'])
+        self.short_utterance_floor_var.set(str(d['short_utterance_floor']))
+        self.offline_fallback_var.set(d['offline_fallback'])
+        self.sound_cues_var.set(d['sound_cues'])
+        self.auto_start_var.set(d['auto_start'])
+        self.overlay_enabled_var.set(d['overlay_enabled'])
+        self.overlay_opacity_var.set(d['overlay_opacity'])
+        self.overlay_position_var.set(d['overlay_position'])
+        self.overlay_max_lines_var.set(str(d['overlay_max_lines']))
 
     def save(self):
         try:
@@ -545,29 +613,7 @@ class SimpleSTTApp:
 
     def _load_settings(self):
         """Load settings from file or return defaults"""
-        default_settings = {
-            'language': 'yue',
-            'continuous': False,
-            'pause_threshold': 1.5,  # Seconds of silence before processing
-            'silence_threshold': 0.01,  # Audio amplitude threshold for silence detection
-            'game_mode': False,  # Use PostMessage/WM_CHAR instead of SendInput (for games with anti-cheat)
-            'game_mode_char_delay': 0.01,  # Delay between characters in game mode (seconds)
-            'idle_timeout': 10,  # Auto-stop recording after N seconds of silence (0 = disabled)
-            'vad_threshold': 0.4,  # Silero VAD speech probability threshold to ENTER speech (0.0-1.0)
-            'vad_exit_threshold': 0.4 - VAD_EXIT_MARGIN,  # Hysteresis: stay capturing until prob drops below this (0.25)
-            'short_utterance_floor': SHORT_UTTERANCE_FLOOR,  # Min voiced duration (s) to keep a segment
-            'offline_fallback': False,  # Use local Whisper when online recognizer fails after retries
-            'sound_cues': True,  # Play a short beep on start (high) / stop (low)
-            'auto_start': False,  # Launch automatically on Windows login (registry Run key)
-            'overlay_enabled': False,
-            'overlay_opacity': 0.90,
-            'overlay_width': 400,
-            'overlay_height': 150,
-            'overlay_position': 'bottom-right',
-            'overlay_max_lines': 10,
-            'overlay_font_size': 11,
-            'microphone': 'auto'
-        }
+        default_settings = _default_settings()
 
         try:
             if os.path.exists(SETTINGS_FILE):
