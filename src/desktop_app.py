@@ -146,18 +146,18 @@ def _default_settings():
     """
     return {
         'language': 'yue',
-        'continuous': False,
+        'continuous': True,
         'pause_threshold': 1.5,  # Seconds of silence before processing
         'silence_threshold': 0.01,  # Audio amplitude threshold for silence detection
         'game_mode': False,  # Use PostMessage/WM_CHAR instead of SendInput (for games with anti-cheat)
         'game_mode_char_delay': 0.01,  # Delay between characters in game mode (seconds)
-        'idle_timeout': 10,  # Auto-stop recording after N seconds of silence (0 = disabled)
+        'idle_timeout': 60,  # Auto-stop recording after N seconds of silence (0 = disabled)
         'vad_threshold': 0.4,  # Silero VAD speech probability threshold to ENTER speech (0.0-1.0)
         'vad_exit_threshold': 0.4 - VAD_EXIT_MARGIN,  # Hysteresis: stay capturing until prob drops below this (0.25)
         'short_utterance_floor': SHORT_UTTERANCE_FLOOR,  # Min voiced duration (s) to keep a segment
         'offline_fallback': False,  # Use local Whisper when online recognizer fails after retries
         'sound_cues': True,  # Play a short beep on start (high) / stop (low)
-        'auto_start': False,  # Launch automatically on login (registry Run key / LaunchAgent)
+        'auto_start': True,  # Launch automatically on login (registry Run key / LaunchAgent)
         'overlay_enabled': False,
         'overlay_opacity': 0.90,
         'overlay_width': 400,
