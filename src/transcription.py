@@ -99,42 +99,60 @@ def transcribe_with_google(audio_path, language=None):
     Transcribe audio file using Google Speech Recognition.
     Better Cantonese support with language code 'yue-HK'.
 
+    Transient service errors (`RequestError`) are retried with exponential
+    backoff. A genuine no-speech result (`UnknownValueError`) is NOT retried.
+
     Args:
         audio_path: path to audio file
         language: language code (e.g., "en-US", "yue-HK") or None for auto-detect
 
     Returns:
         dict: {
-            "text": transcribed text,
-            "language": detected/specified language
+            "text": transcribed text (empty unless status == "ok"),
+            "language": detected/specified language,
+            "status": "ok" | "no_speech" | "failed",
+            "error": error string (only when status == "failed")
         }
     """
+    import time
+    from .config import SR_RETRY_COUNT, SR_RETRY_BASE_BACKOFF
+
+    recognizer = sr.Recognizer()
+
+    # Map language codes to Google SR format
+    lang_map = {
+        "yue": "yue-HK",  # Cantonese (Hong Kong)
+        "zh": "zh-CN",    # Chinese (Mandarin)
+        "en": "en-US",    # English
+        "es": "es-ES",    # Spanish
+        "fr": "fr-FR",    # French
+        "de": "de-DE",    # German
+        "ja": "ja-JP",    # Japanese
+        "ko": "ko-KR",    # Korean
+        "pt": "pt-PT",    # Portuguese
+        "ru": "ru-RU",    # Russian
+        "it": "it-IT"     # Italian
+    }
+
+    # Convert language code
+    google_lang = lang_map.get(language, language) if language else None
+
+    # Load audio file
     try:
-        recognizer = sr.Recognizer()
-
-        # Map language codes to Google SR format
-        lang_map = {
-            "yue": "yue-HK",  # Cantonese (Hong Kong)
-            "zh": "zh-CN",    # Chinese (Mandarin)
-            "en": "en-US",    # English
-            "es": "es-ES",    # Spanish
-            "fr": "fr-FR",    # French
-            "de": "de-DE",    # German
-            "ja": "ja-JP",    # Japanese
-            "ko": "ko-KR",    # Korean
-            "pt": "pt-PT",    # Portuguese
-            "ru": "ru-RU",    # Russian
-            "it": "it-IT"     # Italian
-        }
-
-        # Convert language code
-        google_lang = lang_map.get(language, language) if language else None
-
-        # Load audio file
         with sr.AudioFile(audio_path) as source:
             audio_data = recognizer.record(source)
+    except Exception as e:
+        return {
+            "text": "",
+            "language": language if language else "unknown",
+            "status": "failed",
+            "error": f"Audio read error: {str(e)}",
+        }
 
-        # Transcribe using Google Speech Recognition
+    # Transcribe, retrying only transient service errors
+    attempts = 1 + max(0, SR_RETRY_COUNT)
+    last_error = None
+    for attempt in range(attempts):
         try:
             if google_lang:
                 text = recognizer.recognize_google(audio_data, language=google_lang)
@@ -143,18 +161,30 @@ def transcribe_with_google(audio_path, language=None):
 
             return {
                 "text": text.strip(),
-                "language": language if language else "auto"
+                "language": language if language else "auto",
+                "status": "ok",
             }
         except sr.UnknownValueError:
+            # Genuine no-speech — do not retry
             return {
                 "text": "",
-                "language": language if language else "unknown"
+                "language": language if language else "unknown",
+                "status": "no_speech",
             }
         except sr.RequestError as e:
-            raise Exception(f"Google Speech Recognition service error: {str(e)}")
+            last_error = str(e)
+            if attempt < attempts - 1:
+                backoff = SR_RETRY_BASE_BACKOFF * (2 ** attempt)
+                print(f"[DEBUG] Google SR RequestError (attempt {attempt + 1}/{attempts}), retrying in {backoff:.1f}s: {e}")
+                time.sleep(backoff)
 
-    except Exception as e:
-        raise Exception(f"Google transcription failed: {str(e)}")
+    # Exhausted retries
+    return {
+        "text": "",
+        "language": language if language else "unknown",
+        "status": "failed",
+        "error": f"Google Speech Recognition service error: {last_error}",
+    }
 
 
 def process_with_ollama(text, task="improve"):
